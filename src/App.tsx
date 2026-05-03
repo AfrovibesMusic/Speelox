@@ -1229,20 +1229,19 @@ export default function App() {
                               <button 
                                 onClick={handleSaveToDatabase}
                                 disabled={saving}
-                                className="flex-1 flex items-center justify-center gap-2 px-4 py-3 text-slate-400 hover:text-slate-900 transition-colors"
+                                className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-white border border-slate-200 text-slate-500 hover:text-slate-900 hover:border-slate-300 rounded-xl transition-all"
                                 title="Library"
                               >
                                 {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
                                 <span className="text-[9px] font-black uppercase tracking-[0.2em]">Library</span>
                               </button>
-                              <div className="w-[1px] h-6 bg-slate-100" />
                               <button 
                                 onClick={handleExport}
                                 disabled={exporting}
-                                className="flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-slate-900 text-white text-[9px] font-black uppercase tracking-[0.2em] hover:bg-black active:scale-[0.98] transition-all"
+                                className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-white border border-slate-200 text-slate-500 hover:text-slate-900 hover:border-slate-300 rounded-xl transition-all"
                               >
                                 {exporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Share2 className="w-3.5 h-3.5" />}
-                                Publish
+                                <span className="text-[9px] font-black uppercase tracking-[0.2em]">Publish</span>
                               </button>
                             </div>
                             <div className="p-4 pt-0 bg-slate-50/50">

@@ -99,7 +99,7 @@ export const TemplateRenderer: React.FC<TemplateRendererProps> = ({ post, classN
         )}
         <div className="space-y-8 max-w-lg mx-auto z-10">
           <p className={cn(
-            "text-sm md:text-xl font-medium leading-relaxed italic opacity-90 border-l-4 pl-6",
+            "text-sm md:text-xl font-medium leading-relaxed italic opacity-90 border-l-4 pl-6 line-clamp-3",
             templateId.includes("-blueprint") ? "border-indigo-500/50" : "border-slate-200"
           )} style={{ borderLeftColor: `${accentColor}50`, color: descriptionColor }}>
             {description}

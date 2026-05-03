@@ -260,6 +260,14 @@ async function startServer() {
       appType: "spa",
     });
     app.use(vite.middlewares);
+    
+    // Catch-all for dev to prevent MIME errors on missing assets
+    app.get('*', (req, res, next) => {
+      if (req.path.includes('.') && !req.path.endsWith('.html')) {
+        return res.status(404).send('Not found');
+      }
+      next();
+    });
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath, { index: false }));
