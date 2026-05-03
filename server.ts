@@ -114,44 +114,36 @@ export async function createServer() {
       return res.status(400).json({ error: "URL is required" });
     }
 
+    // Set a baseline timeout for the entire operation
+    const ABORT_TIMEOUT = 9000; // 9 seconds to stay under Netlify's 10s limit
+    const startTime = Date.now();
+
     try {
       // 1. Explicit RSS Mode
       if (type === 'rss') {
         const feed = await parser.parseURL(url);
         const today = new Date().toDateString();
         
-        const filteredItems = feed.items
+        // Only get the top 5 to keep it fast
+        const limit = 5;
+        const feedItems = feed.items.slice(0, 10); // Look at first 10
+        
+        const items = feedItems
           .filter(item => {
-            if (!item.pubDate) return false;
-            return new Date(item.pubDate).toDateString() === today;
-          });
-
-        const items = await Promise.all(filteredItems.map(async item => {
-          let image = extractImageFromRSS(item, url);
-          
-          if (!image && item.link) {
-            try {
-              const { data } = await axios.get(item.link, { timeout: 2000, headers: { 'User-Agent': 'Mozilla/5.0' } });
-              const $ = cheerio.load(data);
-              image = $('meta[property="og:image"]').attr('content') || 
-                      $('meta[name="twitter:image"]').attr('content') ||
-                      $('link[rel="image_src"]').attr('href');
-              
-              if (image && !image.startsWith('http')) {
-                 const baseUrl = new URL(item.link);
-                 image = new URL(image, baseUrl.origin).href;
-              }
-            } catch (e) {}
-          }
-
-          return {
+            if (!item.pubDate) return true; // Include if no date
+            const itemDate = new Date(item.pubDate);
+            // Include if from today or yesterday to be safe
+            const diff = (Date.now() - itemDate.getTime()) / (1000 * 60 * 60 * 24);
+            return diff <= 2;
+          })
+          .slice(0, limit)
+          .map(item => ({
             title: item.title,
             content: item.contentSnippet || item.content,
             link: item.link,
             pubDate: item.pubDate,
-            image: image || null
-          };
-        }));
+            image: extractImageFromRSS(item, url) || null
+          }));
 
         return res.json({ type: 'rss', title: feed.title, items });
       }
@@ -165,10 +157,8 @@ export async function createServer() {
             : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
           'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
           'Accept-Language': 'en-US,en;q=0.9',
-          'Cache-Control': 'no-cache',
-          'Pragma': 'no-cache'
         },
-        timeout: 10000
+        timeout: 6000 // 6 second timeout for main fetch
       });
       const $ = cheerio.load(html);
 
@@ -208,8 +198,7 @@ export async function createServer() {
         });
       }
 
-      // Default Logic: Try to find article-like elements (fallback for unspecified type)
-      let items: any[] = [];
+      // Default Logic: Try to find article-like elements
       let discoveredItems: any[] = [];
       const selectors = ['article', '.post', '.entry', '.item', '.media-block', '.story-preview'];
       
@@ -225,42 +214,64 @@ export async function createServer() {
           if (link && title && title.length > 10) {
             let absLink = link;
             try { absLink = new URL(link, url).href; } catch(e) {}
-            discoveredItems.push({ title, link: absLink, content: $el.find('p').first().text().trim() });
+            
+            // Try to get internal image for this list item
+            let listItemImage = $el.find('img').first().attr('src');
+            if (listItemImage && !listItemImage.startsWith('http')) {
+              try { listItemImage = new URL(listItemImage, url).href; } catch(e) {}
+            }
+
+            discoveredItems.push({ 
+              title, 
+              link: absLink, 
+              content: $el.find('p').first().text().trim(),
+              image: listItemImage || null
+            });
           }
         });
       });
 
-      items = Array.from(new Map(discoveredItems.map(i => [i.link, i])).values()).slice(0, 5);
+      let items = Array.from(new Map(discoveredItems.map(i => [i.link, i])).values()).slice(0, 5);
 
       if (items.length === 0) {
         const title = $('meta[property="og:title"]').attr('content') || $('title').text();
         const description = $('meta[property="og:description"]').attr('content') || '';
-        const image = $('meta[property="og:image"]').attr('content');
+        const image = $('meta[property="og:image"]').attr('content') || $('meta[name="twitter:image"]').attr('content');
         let absImage = image;
         if (absImage && !absImage.startsWith('http')) {
           try { absImage = new URL(absImage, url).href; } catch(e) {}
         }
-        items = [{ title, content: description, image: absImage || null, link: url }];
+        items = [{ title, content: description, image: absImage || null, link: url, pubDate: new Date().toISOString() }];
       } else {
-        // Deep scrape images
-        items = await Promise.all(items.map(async item => {
-          try {
-            const res = await axios.get(item.link, { timeout: 3000, headers: { 'User-Agent': 'Mozilla/5.0' } });
-            const $post = cheerio.load(res.data);
-            let img = $post('meta[property="og:image"]').attr('content') || $post('article img').first().attr('src');
-            if (img && !img.startsWith('http')) try { img = new URL(img, item.link).href; } catch(e) {}
-            return { ...item, image: img || null, pubDate: new Date().toISOString() };
-          } catch (e) {
-            return { ...item, image: null, pubDate: new Date().toISOString() };
-          }
-        }));
+        // To prevent timeouts, we SKIP deep scraping for images if we already have some or if time is running out
+        // Only deep scrape if we don't have images for items
+        const needsImageCount = items.filter(i => !i.image).length;
+        const timeRemaining = ABORT_TIMEOUT - (Date.now() - startTime);
+
+        if (needsImageCount > 0 && timeRemaining > 3000) {
+          items = await Promise.all(items.map(async item => {
+            if (item.image) return { ...item, pubDate: new Date().toISOString() };
+            try {
+              // Shorter timeout for sub-requests
+              const res = await axios.get(item.link, { timeout: 2000, headers: { 'User-Agent': 'Mozilla/5.0' } });
+              const $post = cheerio.load(res.data);
+              let img = $post('meta[property="og:image"]').attr('content') || $post('article img').first().attr('src');
+              if (img && !img.startsWith('http')) try { img = new URL(img, item.link).href; } catch(e) {}
+              return { ...item, image: img || null, pubDate: new Date().toISOString() };
+            } catch (e) {
+              return { ...item, image: null, pubDate: new Date().toISOString() };
+            }
+          }));
+        } else {
+           items = items.map(i => ({ ...i, pubDate: new Date().toISOString() }));
+        }
       }
       
       return res.json({ type: 'web', title: $('title').text() || 'Web Content', items });
 
     } catch (error: any) {
       console.error("Extraction error:", error.message);
-      res.status(500).json({ error: "Failed to extract content from the provided link." });
+      res.status(500).json({ error: `Failed to extract content: ${error.message}` });
     }
   });
 
