@@ -1,0 +1,81 @@
+{
+  "entities": {
+    "userSettings": {
+      "title": "User Settings",
+      "description": "Global settings for the user profile",
+      "type": "object",
+      "properties": {
+        "username": {
+          "type": "string",
+          "description": "Unique username for the user"
+        },
+        "logoUrl": {
+          "type": "string",
+          "description": "URL of the user's logo"
+        },
+        "defaultPrimaryColor": {
+          "type": "string",
+          "description": "Default primary color for generated posts"
+        },
+        "defaultTemplateId": {
+          "type": "string",
+          "description": "Default template ID for the user"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the settings were last updated"
+        }
+      },
+      "required": ["updatedAt"]
+    },
+    "usernameRegistry": {
+      "title": "Username Registry",
+      "description": "Ensures username uniqueness",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" }
+      },
+      "required": ["userId"]
+    },
+    "generatedPost": {
+      "title": "Generated Post",
+      "description": "A saved social media post asset",
+      "type": "object",
+      "properties": {
+        "templateId": { "type": "string" },
+        "headline": { "type": "string" },
+        "caption": { "type": "string" },
+        "imageUrl": { "type": ["string", "null"] },
+        "platform": { "type": "string" },
+        "styles": { 
+          "type": "object",
+          "properties": {
+            "primaryColor": { "type": "string" },
+            "headingSize": { "type": "string" },
+            "accentColor": { "type": "string" },
+            "zoom": { "type": "number" },
+            "filter": { "type": "string" }
+          }
+        },
+        "logoUrl": { "type": ["string", "null"] },
+        "savedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["templateId", "headline", "caption", "savedAt"]
+    }
+  },
+  "firestore": {
+    "/settings/{userId}": {
+      "schema": "userSettings",
+      "description": "User specific settings"
+    },
+    "/usernames/{username}": {
+      "schema": "usernameRegistry",
+      "description": "Lookup table for unique usernames"
+    },
+    "/users/{userId}/posts/{postId}": {
+      "schema": "generatedPost",
+      "description": "User's saved posts library"
+    }
+  }
+}

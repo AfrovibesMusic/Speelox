@@ -1,0 +1,102 @@
+import { PostTemplate } from "./types";
+
+export const POST_TEMPLATES: PostTemplate[] = [
+  {
+    id: "insta-modern-classic",
+    name: "Modern Classic",
+    platform: "instagram",
+    aspectRatio: "1:1",
+    style: "modern",
+  },
+  {
+    id: "insta-modern-bold",
+    name: "Modern Bold",
+    platform: "instagram",
+    aspectRatio: "1:1",
+    style: "modern-bold",
+  },
+  {
+    id: "insta-modern-clean",
+    name: "Modern Clean",
+    platform: "instagram",
+    aspectRatio: "1:1",
+    style: "modern-clean",
+  },
+  {
+    id: "insta-modern-dark",
+    name: "Modern Dark",
+    platform: "instagram",
+    aspectRatio: "1:1",
+    style: "modern-dark",
+  },
+  {
+    id: "insta-modern-brutalist",
+    name: "Modern Brutalist",
+    platform: "instagram",
+    aspectRatio: "1:1",
+    style: "modern-brutalist",
+  },
+  {
+    id: "insta-modern-gradient",
+    name: "Modern Gradient",
+    platform: "instagram",
+    aspectRatio: "1:1",
+    style: "modern-gradient",
+  },
+  {
+    id: "insta-modern-split",
+    name: "Modern Split",
+    platform: "instagram",
+    aspectRatio: "1:1",
+    style: "modern-split",
+  },
+  {
+    id: "insta-modern-minimal",
+    name: "Modern Minimal",
+    platform: "instagram",
+    aspectRatio: "1:1",
+    style: "modern-minimal",
+  },
+  {
+    id: "insta-modern-offset",
+    name: "Modern Offset",
+    platform: "instagram",
+    aspectRatio: "1:1",
+    style: "modern-offset",
+  },
+  {
+    id: "insta-modern-badge",
+    name: "Modern Badge",
+    platform: "instagram",
+    aspectRatio: "1:1",
+    style: "modern-badge",
+  },
+  {
+    id: "insta-modern-floating",
+    name: "Modern Floating",
+    platform: "instagram",
+    aspectRatio: "1:1",
+    style: "modern-floating",
+  },
+  {
+    id: "insta-architect-editorial",
+    name: "Architect: Editorial",
+    platform: "instagram",
+    aspectRatio: "1:1",
+    style: "architect-editorial",
+  },
+  {
+    id: "insta-architect-blueprint",
+    name: "Architect: Blueprint",
+    platform: "instagram",
+    aspectRatio: "1:1",
+    style: "architect-blueprint",
+  },
+  {
+    id: "insta-architect-gallery",
+    name: "Architect: Gallery",
+    platform: "instagram",
+    aspectRatio: "1:1",
+    style: "architect-gallery",
+  }
+];
