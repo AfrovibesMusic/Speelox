@@ -1,17 +1,43 @@
+import { GoogleGenAI, Type } from "@google/genai";
+
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+
 export async function generatePostContent(title: string, description: string = "") {
   try {
-    const response = await fetch("/api/generate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title, description }),
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: [{
+        role: "user",
+        parts: [{
+          text: `Create short, punchy social media post ideas based on this content:
+      Title: ${title}
+      Description: ${description}
+      
+      I need 3 things:
+      1. A "headline" for the first image (max 10 words).
+      2. A "caption" for the post body/comment section.
+      3. A "description" for a SECOND slide. This should be a concise summary or a list of key points from the original content (max 50 words).
+      
+      The headline should be max 10 words.
+      The caption should be engaging and include relevant hashtags.`
+        }]
+      }],
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            headline: { type: Type.STRING },
+            caption: { type: Type.STRING },
+            description: { type: Type.STRING },
+          },
+          required: ["headline", "caption", "description"],
+        },
+      },
     });
 
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || "Generation failed");
-    }
-
-    return response.json() as Promise<{ headline: string; caption: string; description: string }>;
+    const result = JSON.parse(response.text || "{}");
+    return result as { headline: string; caption: string; description: string };
   } catch (error) {
     console.error("Gemini generation error:", error);
     return {
@@ -22,21 +48,64 @@ export async function generatePostContent(title: string, description: string = "
   }
 }
 
-export async function enhanceImageWithAI(imageUrl: string, headline: string) {
+export async function enhanceImageWithAI(currentImageUrl: string, headline: string) {
   try {
-    const response = await fetch("/api/enhance-image", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ imageUrl, headline }),
+    // 1. Analyze the current image
+    let analysisPrompt = `Analyze this image and the headline "${headline}". 
+    Create a highly detailed, professional prompt for an AI image generator to REPLICATE this scene with significantly higher fidelity, clarity and professional production quality.
+    Return ONLY the prompt string, no other text.`;
+
+    // Fetch image through proxy to avoid CORS
+    const proxyUrl = `/api/proxy?url=${encodeURIComponent(currentImageUrl)}`;
+    const imageResponse = await fetch(proxyUrl);
+    const blob = await imageResponse.blob();
+    const base64Data = await new Promise<string>((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve((reader.result as string).split(',')[1]);
+      reader.readAsDataURL(blob);
     });
 
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || "Enhancement failed");
+    const analysisResult = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: [{
+        role: "user",
+        parts: [
+          {
+            inlineData: {
+              data: base64Data,
+              mimeType: "image/webp"
+            }
+          },
+          { text: analysisPrompt }
+        ]
+      }],
+    });
+
+    const enhancedPrompt = analysisResult.text?.trim() || `Ultra-high resolution professional photography of ${headline}, cinematic lighting, 8k, realistic textures, sharp focus`;
+
+    // 2. Generate the new image
+    const generationResult = await ai.models.generateContent({
+      model: "gemini-3.1-flash-image-preview",
+      contents: [{
+        role: "user",
+        parts: [{ text: enhancedPrompt }]
+      }],
+      config: {
+        imageConfig: {
+          aspectRatio: "1:1",
+          imageSize: "2K",
+        }
+      }
+    });
+
+    // Find the image part
+    for (const part of generationResult.candidates?.[0]?.content?.parts || []) {
+      if (part.inlineData) {
+        return `data:image/png;base64,${part.inlineData.data}`;
+      }
     }
 
-    const { imageUrl: enhancedUrl } = await response.json();
-    return enhancedUrl as string;
+    throw new Error("No image data returned from Gemini");
   } catch (error) {
     console.error("Image enhancement error:", error);
     throw error;

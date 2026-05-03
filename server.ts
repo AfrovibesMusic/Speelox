@@ -4,10 +4,7 @@ import fs from "fs";
 import axios from "axios";
 import * as cheerio from "cheerio";
 import Parser from "rss-parser";
-import { GoogleGenAI, Type } from "@google/genai";
 import { fileURLToPath } from "url";
-
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -82,10 +79,11 @@ function extractImageFromRSS(item: any, sourceUrl: string) {
 
 export async function createServer() {
   const app = express();
+  const apiRouter = express.Router();
   
   app.use(express.json());
 
-  app.get("/api/health", (req, res) => res.json({ 
+  apiRouter.get("/health", (req, res) => res.json({ 
     status: "ok", 
     path: req.path, 
     url: req.url,
@@ -94,100 +92,7 @@ export async function createServer() {
     hasApiKey: !!process.env.GEMINI_API_KEY
   }));
 
-  app.post("/api/generate", async (req, res) => {
-    const { title, description } = req.body;
-    try {
-      const model = ai.getGenerativeModel({ model: "gemini-3-flash-preview" });
-      const prompt = `Create short, punchy social media post ideas based on this content:
-      Title: ${title}
-      Description: ${description}
-      
-      I need 3 things:
-      1. A "headline" for the first image (max 10 words).
-      2. A "caption" for the post body/comment section.
-      3. A "description" for a SECOND slide. This should be a concise summary or a list of key points from the original content (max 50 words).
-      
-      The headline should be max 10 words.
-      The caption should be engaging and include relevant hashtags.`;
-
-      const result = await model.generateContent({
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              headline: { type: Type.STRING },
-              caption: { type: Type.STRING },
-              description: { type: Type.STRING },
-            },
-            required: ["headline", "caption", "description"],
-          },
-        },
-      });
-
-      res.json(JSON.parse(result.response.text()));
-    } catch (e: any) {
-      console.error("Gemini generation error:", e);
-      res.status(500).json({ error: e.message });
-    }
-  });
-
-  app.post("/api/enhance-image", async (req, res) => {
-    const { imageUrl, headline } = req.body;
-    try {
-      // 1. Analyze the current image
-      const analysisModel = ai.getGenerativeModel({ model: "gemini-3-flash-preview" });
-      
-      // Fetch the image
-      const imageResponse = await axios.get(`https://images.weserv.nl/?url=${encodeURIComponent(imageUrl)}&output=webp`, {
-        responseType: 'arraybuffer'
-      });
-      const base64Data = Buffer.from(imageResponse.data).toString('base64');
-
-      const analysisPrompt = `Analyze this image and the headline "${headline}". 
-      Create a highly detailed, professional prompt for an AI image generator to REPLICATE this scene with significantly higher fidelity, clarity and professional production quality.
-      Return ONLY the prompt string, no other text.`;
-
-      const analysisResult = await analysisModel.generateContent([
-        {
-          inlineData: {
-            data: base64Data,
-            mimeType: "image/webp"
-          }
-        },
-        { text: analysisPrompt }
-      ]);
-
-      const enhancedPrompt = analysisResult.response.text().trim();
-
-      // 2. Generate the new image
-      const generationModel = ai.getGenerativeModel({ model: "gemini-3.1-flash-image-preview" });
-      const generationResult = await generationModel.generateContent({
-        contents: [{ role: "user", parts: [{ text: enhancedPrompt }] }],
-        generationConfig: {
-          imageConfig: {
-            aspectRatio: "1:1",
-            imageSize: "2K",
-          } as any // Use as any if types aren't fully synchronized
-        }
-      } as any);
-
-      // Find the image part
-      for (const part of generationResult.response.candidates?.[0]?.content?.parts || []) {
-        if (part.inlineData) {
-          return res.json({ imageUrl: `data:image/png;base64,${part.inlineData.data}` });
-        }
-      }
-
-      throw new Error("No image data returned from Gemini");
-    } catch (e: any) {
-      console.error("Image enhancement error:", e);
-      res.status(500).json({ error: e.message });
-    }
-  });
-
-  app.get("/api/proxy", async (req, res) => {
+  apiRouter.get("/proxy", async (req, res) => {
     const { url } = req.query;
     if (!url || typeof url !== 'string') return res.status(400).send("No URL");
     try {
@@ -202,7 +107,7 @@ export async function createServer() {
   });
 
   // API Route to fetch and parse content
-  app.post("/api/extract", async (req, res) => {
+  apiRouter.post("/extract", async (req, res) => {
     const { url, type } = req.body;
 
     if (!url) {
@@ -328,7 +233,6 @@ export async function createServer() {
       items = Array.from(new Map(discoveredItems.map(i => [i.link, i])).values()).slice(0, 5);
 
       if (items.length === 0) {
-        // ... (Same single article extraction logic as above)
         const title = $('meta[property="og:title"]').attr('content') || $('title').text();
         const description = $('meta[property="og:description"]').attr('content') || '';
         const image = $('meta[property="og:image"]').attr('content');
@@ -359,6 +263,12 @@ export async function createServer() {
       res.status(500).json({ error: "Failed to extract content from the provided link." });
     }
   });
+
+  app.use("/api", apiRouter);
+  
+  if (process.env.NETLIFY || process.env.LAMBDA_TASK_ROOT) {
+    app.use("/", apiRouter);
+  }
 
   return app;
 }
