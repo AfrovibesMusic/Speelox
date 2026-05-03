@@ -298,14 +298,24 @@ async function startServer() {
       console.warn("Vite not found, skipping middleware");
     }
   } else if (!process.env.NETLIFY && !process.env.LAMBDA_TASK_ROOT) {
-    const distPath = path.join(process.cwd(), 'dist');
+    const distPath = path.resolve(__dirname, "dist");
+    console.log(`Serving static files from: ${distPath}`);
+    
     app.use(express.static(distPath, { index: false }));
+    
     app.get('*', (req, res) => {
       // Avoid MIME type errors by not serving index.html for file-like requests that were not found
       if (req.path.includes('.') && !req.path.endsWith('.html')) {
-        return res.status(404).send('Not found');
+        console.warn(`Asset not found: ${req.path}`);
+        return res.status(404).type('text/plain').send('Not found');
       }
-      res.sendFile(path.join(distPath, 'index.html'));
+      
+      const indexPath = path.join(distPath, 'index.html');
+      if (fs.existsSync(indexPath)) {
+        res.sendFile(indexPath);
+      } else {
+        res.status(404).type('text/plain').send('App not built yet');
+      }
     });
   }
 
