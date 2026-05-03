@@ -16,10 +16,67 @@ const parser = new Parser({
   }
 });
 
-async function startServer() {
-  const app = express();
-  const PORT = 3000;
+function extractImageFromRSS(item: any, sourceUrl: string) {
+  // 1. Try enclosure (Standard RSS 2.0)
+  if (item.enclosure && item.enclosure.url && item.enclosure.type?.startsWith('image/')) {
+    return item.enclosure.url;
+  }
 
+  // 2. Try Media Namespace (media:content, media:thumbnail)
+  const extractFromMedia = (media: any) => {
+    if (!media) return null;
+    if (Array.isArray(media)) {
+      const found = media.find((m: any) => m.$?.type?.startsWith('image/') || m.$?.medium === 'image' || !m.$?.type);
+      return found ? found.$?.url : null;
+    }
+    return media.$?.url || null;
+  };
+
+  let image = extractFromMedia(item['media:content']) || extractFromMedia(item['media:thumbnail']);
+  if (image) return image;
+
+  // 3. Try media:group
+  if (item['media:group']) {
+    image = extractFromMedia(item['media:group']['media:content']) || extractFromMedia(item['media:group']['media:thumbnail']);
+    if (image) return image;
+  }
+
+  // 4. Try iTunes Image (Podcasts)
+  if (item.itunes && item.itunes.image) {
+    return item.itunes.image;
+  }
+
+  // 5. Try parsing HTML fields (content:encoded, content, description)
+  const possibleHtmlFields = ['content:encoded', 'content', 'contentSnippet', 'description', 'summary'];
+  for (const field of possibleHtmlFields) {
+    const html = item[field];
+    if (html && typeof html === 'string' && (html.includes('<img') || html.includes('&lt;img'))) {
+      try {
+        // Flatten escaped HTML if necessary
+        const cleanHtml = html.includes('&lt;img') ? html.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&') : html;
+        const $ = cheerio.load(cleanHtml);
+        let img = $('img').first().attr('src');
+        if (img) {
+          // Filter out small tracker pixels or relative paths
+          if (!img.startsWith('http')) {
+            try {
+              const baseUrl = new URL(item.link || sourceUrl);
+              img = new URL(img, baseUrl.origin).href;
+            } catch (e) {}
+          }
+          // Basic check to skip tiny icons/trackers (optional but usually helpful)
+          return img;
+        }
+      } catch (e) {}
+    }
+  }
+
+  return null;
+}
+
+export async function createServer() {
+  const app = express();
+  
   app.use(express.json());
 
   app.get("/api/proxy", async (req, res) => {
@@ -195,63 +252,12 @@ async function startServer() {
     }
   });
 
-  function extractImageFromRSS(item: any, sourceUrl: string) {
-    // 1. Try enclosure (Standard RSS 2.0)
-    if (item.enclosure && item.enclosure.url && item.enclosure.type?.startsWith('image/')) {
-      return item.enclosure.url;
-    }
+  return app;
+}
 
-    // 2. Try Media Namespace (media:content, media:thumbnail)
-    const extractFromMedia = (media: any) => {
-      if (!media) return null;
-      if (Array.isArray(media)) {
-        const found = media.find((m: any) => m.$?.type?.startsWith('image/') || m.$?.medium === 'image' || !m.$?.type);
-        return found ? found.$?.url : null;
-      }
-      return media.$?.url || null;
-    };
-
-    let image = extractFromMedia(item['media:content']) || extractFromMedia(item['media:thumbnail']);
-    if (image) return image;
-
-    // 3. Try media:group
-    if (item['media:group']) {
-      image = extractFromMedia(item['media:group']['media:content']) || extractFromMedia(item['media:group']['media:thumbnail']);
-      if (image) return image;
-    }
-
-    // 4. Try iTunes Image (Podcasts)
-    if (item.itunes && item.itunes.image) {
-      return item.itunes.image;
-    }
-
-    // 5. Try parsing HTML fields (content:encoded, content, description)
-    const possibleHtmlFields = ['content:encoded', 'content', 'contentSnippet', 'description', 'summary'];
-    for (const field of possibleHtmlFields) {
-      const html = item[field];
-      if (html && typeof html === 'string' && (html.includes('<img') || html.includes('&lt;img'))) {
-        try {
-          // Flatten escaped HTML if necessary
-          const cleanHtml = html.includes('&lt;img') ? html.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&') : html;
-          const $ = cheerio.load(cleanHtml);
-          let img = $('img').first().attr('src');
-          if (img) {
-            // Filter out small tracker pixels or relative paths
-            if (!img.startsWith('http')) {
-              try {
-                const baseUrl = new URL(item.link || sourceUrl);
-                img = new URL(img, baseUrl.origin).href;
-              } catch (e) {}
-            }
-            // Basic check to skip tiny icons/trackers (optional but usually helpful)
-            return img;
-          }
-        } catch (e) {}
-      }
-    }
-
-    return null;
-  }
+async function startServer() {
+  const app = await createServer();
+  const PORT = 3000;
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
