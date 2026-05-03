@@ -115,13 +115,20 @@ export async function createServer() {
     }
 
     // Set a baseline timeout for the entire operation
-    const ABORT_TIMEOUT = 9000; // 9 seconds to stay under Netlify's 10s limit
+    const ABORT_TIMEOUT = 8000; // 8 seconds to stay safely under Netlify's 10s limit
     const startTime = Date.now();
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), ABORT_TIMEOUT);
 
     try {
+      console.log(`[Extract] Starting for URL: ${url}, type: ${type}`);
       // 1. Explicit RSS Mode
       if (type === 'rss') {
-        const feed = await parser.parseURL(url);
+        const feed = await Promise.race([
+          parser.parseURL(url),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("RSS Feed Timeout")), 6000))
+        ]) as any;
+        
         const today = new Date().toDateString();
         
         // Only get the top 5 to keep it fast
@@ -145,11 +152,13 @@ export async function createServer() {
             image: extractImageFromRSS(item, url) || null
           }));
 
+        clearTimeout(timeoutId);
         return res.json({ type: 'rss', title: feed.title, items });
       }
 
       const isInstagram = url.includes('instagram.com') || url.includes('instagr.am');
       
+      console.log(`[Extract] Fetching HTML...`);
       const { data: html } = await axios.get(url, {
         headers: {
           'User-Agent': isInstagram 
@@ -157,9 +166,16 @@ export async function createServer() {
             : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
           'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
           'Accept-Language': 'en-US,en;q=0.9',
+          'Referer': 'https://www.google.com/',
         },
-        timeout: 6000 // 6 second timeout for main fetch
+        timeout: 4500, // 4.5 second timeout for main fetch
+        signal: controller.signal,
+        validateStatus: (status) => status < 500 // Handle 4xx as data, not crash
       });
+      console.log(`[Extract] HTML fetched (Status: ${html ? 'Got Data' : 'No Data'})`);
+      if (!html || typeof html !== 'string') {
+        throw new Error("Empty or invalid response from site");
+      }
       const $ = cheerio.load(html);
 
       // 2. Explicit Link Mode (Single Article)
@@ -188,6 +204,7 @@ export async function createServer() {
 
         const items = [{ title, content: description, image: absImage || null, link: url, pubDate: new Date().toISOString() }];
         
+        clearTimeout(timeoutId);
         return res.json({
           type: 'link',
           title: $('title').text() || 'Web Content',
@@ -267,11 +284,25 @@ export async function createServer() {
         }
       }
       
+      clearTimeout(timeoutId);
       return res.json({ type: 'web', title: $('title').text() || 'Web Content', items });
 
     } catch (error: any) {
-      console.error("Extraction error:", error.message);
-      res.status(500).json({ error: `Failed to extract content: ${error.message}` });
+      clearTimeout(timeoutId);
+      console.error(`[Extract Error] ${url}:`, error.message);
+      
+      // Categorize the error for the user
+      let errorMessage = error.message;
+      if (error.name === 'AbortError' || error.message?.includes('timeout')) {
+        errorMessage = "The request timed out. The site might be slow or blocking our server.";
+      } else if (error.response) {
+        errorMessage = `The site returned an error (${error.response.status}).`;
+      }
+      
+      res.status(500).json({ 
+        error: `Failed to extract content: ${errorMessage}`,
+        details: process.env.NODE_ENV === 'development' ? error.stack : undefined 
+      });
     }
   });
 
