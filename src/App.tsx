@@ -858,7 +858,7 @@ export default function App() {
           </div>
           <div className="">
             <h1 className="font-display font-black text-lg md:text-xl tracking-tighter uppercase leading-none">Speelox</h1>
-            <p className="text-[8px] md:text-[9px] font-black uppercase tracking-[0.3em] text-slate-400 mt-0.5">Content Studio</p>
+            <p className="text-[8px] md:text-[9px] font-black uppercase tracking-[0.3em] text-slate-400 mt-0.5">Asset Publishing</p>
           </div>
         </div>
         
@@ -1069,8 +1069,8 @@ export default function App() {
                         <button 
                           onClick={(e) => post.id && handleDeletePost(e, post.id)}
                           className={cn(
-                            "absolute right-4 top-1/2 -translate-y-1/2 p-2 rounded-lg",
-                            generatedPost?.id === post.id ? "text-white/30" : "text-slate-300"
+                            "absolute right-4 top-1/2 -translate-y-1/2 p-2 rounded-lg transition-transform active:scale-90",
+                            generatedPost?.id === post.id ? "text-white/20" : "text-slate-200"
                           )}
                           title="Delete Asset"
                         >
@@ -1225,20 +1225,21 @@ export default function App() {
                               </div>
                             )}
 
-                            <div className="p-4 bg-slate-50/50 border-t border-slate-100 flex items-center justify-between gap-3">
+                            <div className="p-4 bg-white border-t border-slate-100 flex items-center justify-between gap-3">
                               <button 
                                 onClick={handleSaveToDatabase}
                                 disabled={saving}
-                                className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-white border border-slate-200 text-slate-500 hover:text-slate-900 hover:border-slate-300 rounded-xl transition-all"
-                                title="Save to Library"
+                                className="flex-1 flex items-center justify-center gap-2 px-4 py-3 text-slate-400 hover:text-slate-900 transition-colors"
+                                title="Library"
                               >
                                 {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
                                 <span className="text-[9px] font-black uppercase tracking-[0.2em]">Library</span>
                               </button>
+                              <div className="w-[1px] h-6 bg-slate-100" />
                               <button 
                                 onClick={handleExport}
                                 disabled={exporting}
-                                className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-slate-900 text-white text-[9px] font-black uppercase tracking-[0.2em] rounded-xl hover:bg-slate-800 transition-all shadow-sm"
+                                className="flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-slate-900 text-white text-[9px] font-black uppercase tracking-[0.2em] hover:bg-black active:scale-[0.98] transition-all"
                               >
                                 {exporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Share2 className="w-3.5 h-3.5" />}
                                 Publish
@@ -1266,7 +1267,7 @@ export default function App() {
                     <div className="w-24 h-24 bg-white shadow-[0_20px_50px_rgba(0,0,0,0.1)] flex items-center justify-center mx-auto mb-8 transform -rotate-12 group-hover:rotate-0 transition-transform overflow-hidden rounded-2xl p-4">
                       <img src="https://i.postimg.cc/MpZpRwBd/speelox-logo.png" className="w-full h-full object-contain" alt="Speelox" />
                     </div>
-                    <h3 className="text-2xl font-black font-display uppercase tracking-tighter text-slate-800">Synthetic Studio</h3>
+                    <h3 className="text-2xl font-black font-display uppercase tracking-tighter text-slate-800">Publishing Engine</h3>
                     <p className="text-[11px] font-bold text-slate-400 mt-4 uppercase tracking-[0.2em] leading-relaxed max-w-[220px] mx-auto">
                       Ingest source content to initiate social architecture.
                     </p>
@@ -1303,7 +1304,7 @@ export default function App() {
             className={cn("flex flex-col items-center gap-1 transition-all", activeTab === 'preview' ? "text-red-500 scale-110" : "text-slate-500")}
           >
             <LayoutTemplate className="w-5 h-5" />
-            <span className="text-[7px] font-black uppercase tracking-widest">Studio</span>
+            <span className="text-[7px] font-black uppercase tracking-widest">Publish</span>
           </button>
         </div>
 

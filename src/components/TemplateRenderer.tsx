@@ -290,7 +290,7 @@ export const TemplateRenderer: React.FC<TemplateRendererProps> = ({ post, classN
                 )}
               </div>
               <div className="w-1/2 h-full flex flex-col items-center justify-center p-8 bg-slate-900 text-white border-l-4" style={{ borderColor: accentColor, color: captionColor }}>
-                <h2 className={cn("font-black uppercase text-center leading-[0.8] tracking-tighter", getHeadingSize())}>
+                <h2 className={cn("font-black uppercase text-center leading-[0.8] tracking-tighter line-clamp-3", getHeadingSize())}>
                   {headline}
                 </h2>
               </div>
