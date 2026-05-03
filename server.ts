@@ -1,10 +1,16 @@
 import express from "express";
-import { createServer as createViteServer } from "vite";
 import path from "path";
 import fs from "fs";
 import axios from "axios";
 import * as cheerio from "cheerio";
 import Parser from "rss-parser";
+import { GoogleGenAI, Type } from "@google/genai";
+import { fileURLToPath } from "url";
+
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const parser = new Parser({
   customFields: {
@@ -78,6 +84,108 @@ export async function createServer() {
   const app = express();
   
   app.use(express.json());
+
+  app.get("/api/health", (req, res) => res.json({ 
+    status: "ok", 
+    path: req.path, 
+    url: req.url,
+    env: process.env.NODE_ENV,
+    isNetlify: !!process.env.NETLIFY,
+    hasApiKey: !!process.env.GEMINI_API_KEY
+  }));
+
+  app.post("/api/generate", async (req, res) => {
+    const { title, description } = req.body;
+    try {
+      const model = ai.getGenerativeModel({ model: "gemini-3-flash-preview" });
+      const prompt = `Create short, punchy social media post ideas based on this content:
+      Title: ${title}
+      Description: ${description}
+      
+      I need 3 things:
+      1. A "headline" for the first image (max 10 words).
+      2. A "caption" for the post body/comment section.
+      3. A "description" for a SECOND slide. This should be a concise summary or a list of key points from the original content (max 50 words).
+      
+      The headline should be max 10 words.
+      The caption should be engaging and include relevant hashtags.`;
+
+      const result = await model.generateContent({
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              headline: { type: Type.STRING },
+              caption: { type: Type.STRING },
+              description: { type: Type.STRING },
+            },
+            required: ["headline", "caption", "description"],
+          },
+        },
+      });
+
+      res.json(JSON.parse(result.response.text()));
+    } catch (e: any) {
+      console.error("Gemini generation error:", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/enhance-image", async (req, res) => {
+    const { imageUrl, headline } = req.body;
+    try {
+      // 1. Analyze the current image
+      const analysisModel = ai.getGenerativeModel({ model: "gemini-3-flash-preview" });
+      
+      // Fetch the image
+      const imageResponse = await axios.get(`https://images.weserv.nl/?url=${encodeURIComponent(imageUrl)}&output=webp`, {
+        responseType: 'arraybuffer'
+      });
+      const base64Data = Buffer.from(imageResponse.data).toString('base64');
+
+      const analysisPrompt = `Analyze this image and the headline "${headline}". 
+      Create a highly detailed, professional prompt for an AI image generator to REPLICATE this scene with significantly higher fidelity, clarity and professional production quality.
+      Return ONLY the prompt string, no other text.`;
+
+      const analysisResult = await analysisModel.generateContent([
+        {
+          inlineData: {
+            data: base64Data,
+            mimeType: "image/webp"
+          }
+        },
+        { text: analysisPrompt }
+      ]);
+
+      const enhancedPrompt = analysisResult.response.text().trim();
+
+      // 2. Generate the new image
+      const generationModel = ai.getGenerativeModel({ model: "gemini-3.1-flash-image-preview" });
+      const generationResult = await generationModel.generateContent({
+        contents: [{ role: "user", parts: [{ text: enhancedPrompt }] }],
+        generationConfig: {
+          imageConfig: {
+            aspectRatio: "1:1",
+            imageSize: "2K",
+          } as any // Use as any if types aren't fully synchronized
+        }
+      } as any);
+
+      // Find the image part
+      for (const part of generationResult.response.candidates?.[0]?.content?.parts || []) {
+        if (part.inlineData) {
+          return res.json({ imageUrl: `data:image/png;base64,${part.inlineData.data}` });
+        }
+      }
+
+      throw new Error("No image data returned from Gemini");
+    } catch (e: any) {
+      console.error("Image enhancement error:", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
 
   app.get("/api/proxy", async (req, res) => {
     const { url } = req.query;
@@ -261,20 +369,25 @@ async function startServer() {
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
-    
-    // Catch-all for dev to prevent MIME errors on missing assets
-    app.get('*', (req, res, next) => {
-      if (req.path.includes('.') && !req.path.endsWith('.html')) {
-        return res.status(404).send('Not found');
-      }
-      next();
-    });
-  } else {
+    try {
+      const { createServer: createViteServer } = await import("vite");
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: "spa",
+      });
+      app.use(vite.middlewares);
+      
+      // Catch-all for dev to prevent MIME errors on missing assets
+      app.get('*', (req, res, next) => {
+        if (req.path.includes('.') && !req.path.endsWith('.html')) {
+          return res.status(404).send('Not found');
+        }
+        next();
+      });
+    } catch (e) {
+      console.warn("Vite not found, skipping middleware");
+    }
+  } else if (!process.env.NETLIFY && !process.env.LAMBDA_TASK_ROOT) {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath, { index: false }));
     app.get('*', (req, res) => {
@@ -291,4 +404,13 @@ async function startServer() {
   });
 }
 
-startServer();
+// Only start the server if this file is run directly
+const isMain = process.argv[1] && (
+  process.argv[1].endsWith('server.ts') || 
+  process.argv[1].endsWith('server.js') ||
+  process.argv[1].includes('tsx')
+);
+
+if (isMain && !process.env.NETLIFY && !process.env.LAMBDA_TASK_ROOT) {
+  startServer();
+}
