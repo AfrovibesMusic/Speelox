@@ -1,6 +1,7 @@
 export type ContentType = 'link' | 'rss';
 
 export interface ExtractedItem {
+  id?: string;
   title: string;
   content?: string;
   description?: string;
@@ -8,6 +9,8 @@ export interface ExtractedItem {
   link?: string;
   url?: string;
   pubDate?: string;
+  sourceUrl?: string;
+  discoveredAt?: any;
 }
 
 export interface ExtractionResult {

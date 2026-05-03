@@ -16,7 +16,7 @@ import { POST_TEMPLATES } from "./constants";
 import { TemplateRenderer } from "./components/TemplateRenderer";
 import { AuthPage } from "./components/AuthPage";
 import { cn } from "./lib/utils";
-import { auth, loginWithGoogle, getUserSettings, saveUserSettings, savePostToDatabase, getSavedPosts, deleteSavedPost } from "./services/firebase";
+import { auth, loginWithGoogle, getUserSettings, saveUserSettings, savePostToDatabase, getSavedPosts, deleteSavedPost, saveDiscoveredItem, getDiscoveredHistory } from "./services/firebase";
 import { onAuthStateChanged, User as FirebaseUser } from "firebase/auth";
 
 export default function App() {
@@ -43,9 +43,10 @@ export default function App() {
   const [exporting, setExporting] = useState(false);
   const [isEnhancing, setIsEnhancing] = useState(false);
   const [isUploadingLogo, setIsUploadingLogo] = useState(false);
-  const [sidebarMode, setSidebarMode] = useState<'stream' | 'library'>('stream');
+  const [sidebarMode, setSidebarMode] = useState<'stream' | 'library' | 'history'>('stream');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [libraryPosts, setLibraryPosts] = useState<GeneratedPost[]>([]);
+  const [discoveryHistory, setDiscoveryHistory] = useState<ExtractedItem[]>([]);
   const captureRef = useRef<HTMLDivElement>(null);
   const slide1CaptureRef = useRef<HTMLDivElement>(null);
   const slide2CaptureRef = useRef<HTMLDivElement>(null);
@@ -102,8 +103,12 @@ export default function App() {
           // Fetch library
           const posts = await getSavedPosts(userData.uid);
           setLibraryPosts(posts);
+          
+          // Fetch history
+          const history = await getDiscoveredHistory(userData.uid);
+          setDiscoveryHistory(history as any);
         } catch (err) {
-          console.error("Failed to load library", err);
+          console.error("Failed to load data", err);
         }
       }
       setAuthLoading(false);
@@ -220,16 +225,39 @@ export default function App() {
           title: result.title || "Untitled Link",
           description: result.description,
           image: result.image,
-          url: result.url || url
+          url: result.url || url,
+          sourceUrl: url
         };
         setSelectedItem(singleItem);
         enrichedItems = [singleItem];
+        
+        // Auto-save to database
+        if (user) {
+          saveDiscoveredItem(user.uid, singleItem).then(id => {
+            if (id) {
+              setDiscoveryHistory(prev => [{ ...singleItem, id, discoveredAt: new Date().toISOString() }, ...prev]);
+            }
+          });
+        }
+        
         // Auto-generate visual for link
         handleGenerate(singleItem);
       } else if (result.items && result.items.length > 0) {
-        enrichedItems = result.items;
-        const firstItem = result.items[0];
+        enrichedItems = result.items.map(item => ({ ...item, sourceUrl: url }));
+        const firstItem = enrichedItems[0];
         setSelectedItem(firstItem);
+        
+        // Auto-save all items to database
+        if (user) {
+          enrichedItems.forEach(item => {
+            saveDiscoveredItem(user.uid, item).then(id => {
+              if (id) {
+                setDiscoveryHistory(prev => [{ ...item, id, discoveredAt: new Date().toISOString() }, ...prev]);
+              }
+            });
+          });
+        }
+        
         // Auto-generate visual for first item in feed
         handleGenerate(firstItem);
       }
@@ -933,9 +961,19 @@ export default function App() {
                   Library
                   {sidebarMode === 'library' && <div className="absolute bottom-0 left-0 w-full h-[3px] instagram-gradient rounded-full" />}
                 </button>
+                <button 
+                  onClick={() => setSidebarMode('history')}
+                  className={cn(
+                    "text-[10px] font-black uppercase tracking-[0.3em] transition-all relative pb-2",
+                    sidebarMode === 'history' ? "text-slate-900" : "text-slate-300"
+                  )}
+                >
+                  History
+                  {sidebarMode === 'history' && <div className="absolute bottom-0 left-0 w-full h-[3px] instagram-gradient rounded-full" />}
+                </button>
               </div>
               <span className="text-[9px] font-black text-slate-300 uppercase tracking-widest">
-                {sidebarMode === 'stream' ? (extractionResult?.items?.length || (extractionResult ? 1 : 0)) : libraryPosts.length} Assets
+                {sidebarMode === 'stream' ? (extractionResult?.items?.length || (extractionResult ? 1 : 0)) : (sidebarMode === 'library' ? libraryPosts.length : discoveryHistory.length)} Assets
               </span>
             </div>
             
@@ -1031,7 +1069,7 @@ export default function App() {
                     <p className="text-[9px] text-slate-300 mt-2 tracking-tight uppercase font-bold">Awaiting content signals</p>
                   </div>
                 )
-              ) : (
+              ) : sidebarMode === 'library' ? (
                 <div className="space-y-3">
                   {libraryPosts.length > 0 ? (
                     libraryPosts.map((post) => (
@@ -1082,6 +1120,51 @@ export default function App() {
                     <div className="p-10 text-center bg-slate-50 border border-dashed border-slate-200 rounded-3xl text-slate-400">
                       <p className="text-[10px] font-black uppercase tracking-widest">Library Empty</p>
                       <p className="text-[9px] mt-2 font-bold opacity-60 uppercase tracking-tighter">No assets archived yet</p>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-3">
+                   {discoveryHistory.length > 0 ? (
+                    discoveryHistory.map((item, idx) => (
+                      <button 
+                        key={item.id || idx}
+                        onClick={() => {
+                          setSelectedItem(item);
+                          setGeneratedPost(null);
+                          if (window.innerWidth < 768) setActiveTab('preview');
+                        }}
+                        className={cn(
+                          "w-full text-left p-4 rounded-2xl border transition-all flex gap-4 items-center group relative overflow-hidden",
+                          selectedItem?.title === item.title 
+                            ? "border-slate-900 bg-slate-900 text-white studio-shadow" 
+                            : "border-slate-200 bg-white hover:border-slate-300 shadow-sm"
+                        )}
+                      >
+                        <div className={cn(
+                          "w-12 h-12 rounded-xl overflow-hidden shrink-0 border flex items-center justify-center transition-all",
+                          selectedItem?.title === item.title ? "border-slate-800" : "border-slate-100"
+                        )}>
+                          {item.image && item.image.trim() !== "" ? (
+                            <img src={item.image} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center bg-slate-50">
+                              <ImageIcon className="w-5 h-5 text-slate-400 opacity-30" />
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                           <h3 className="font-bold text-[10px] leading-tight line-clamp-2 uppercase tracking-wide">{item.title}</h3>
+                           <p className="text-[8px] mt-1 uppercase font-black tracking-widest text-slate-400 truncate">
+                             {item.sourceUrl || item.link}
+                           </p>
+                        </div>
+                      </button>
+                    ))
+                  ) : (
+                    <div className="p-10 text-center bg-slate-50 border border-dashed border-slate-200 rounded-3xl text-slate-400">
+                      <p className="text-[10px] font-black uppercase tracking-widest">History Sterile</p>
+                      <p className="text-[9px] mt-2 font-bold opacity-60 uppercase tracking-tighter">No extractions recorded</p>
                     </div>
                   )}
                 </div>

@@ -62,6 +62,20 @@
         "savedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["templateId", "headline", "caption", "savedAt"]
+    },
+    "discoveredItem": {
+      "title": "Discovered Item",
+      "description": "Content item pulled from a URL or RSS feed",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "content": { "type": ["string", "null"] },
+        "image": { "type": ["string", "null"] },
+        "link": { "type": "string" },
+        "sourceUrl": { "type": "string" },
+        "discoveredAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "link", "discoveredAt"]
     }
   },
   "firestore": {
@@ -76,6 +90,10 @@
     "/users/{userId}/posts/{postId}": {
       "schema": "generatedPost",
       "description": "User's saved posts library"
+    },
+    "/users/{userId}/discovered/{itemId}": {
+      "schema": "discoveredItem",
+      "description": "History of discovered content items"
     }
   }
 }

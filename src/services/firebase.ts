@@ -133,6 +133,39 @@ export async function deleteSavedPost(userId: string, postId: string) {
   }
 }
 
+export async function saveDiscoveredItem(userId: string, item: any) {
+  const path = `users/${userId}/discovered`;
+  try {
+    // Generate a consistent ID based on the link to avoid duplicates
+    // But since the user might want a history of when they looked at it, 
+    // maybe just a random ID is better, or a hash of the link.
+    // Let's use a hash of the link or just the link as the ID if we want to update.
+    // The user said "history of everything", so maybe unique is better.
+    const itemId = Math.random().toString(36).substring(7);
+    const itemRef = doc(db, 'users', userId, 'discovered', itemId);
+    
+    await setDoc(itemRef, {
+      ...item,
+      discoveredAt: serverTimestamp()
+    });
+    return itemId;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+export async function getDiscoveredHistory(userId: string) {
+  const path = `users/${userId}/discovered`;
+  try {
+    const q = query(collection(db, 'users', userId, 'discovered'), orderBy("discoveredAt", "desc"));
+    const querySnapshot = await getDocs(q);
+    return querySnapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, path);
+    return [];
+  }
+}
+
 export async function saveUserSettings(userId: string, settings: { 
   username?: string, 
   logoUrl: string, 
