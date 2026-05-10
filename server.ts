@@ -5,9 +5,15 @@ import axios from "axios";
 import * as cheerio from "cheerio";
 import Parser from "rss-parser";
 import { fileURLToPath } from "url";
+import { GoogleGenAI, Type } from "@google/genai";
+import dotenv from "dotenv";
+
+dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 
 const parser = new Parser({
   customFields: {
@@ -303,6 +309,150 @@ export async function createServer() {
         error: `Failed to extract content: ${errorMessage}`,
         details: process.env.NODE_ENV === 'development' ? error.stack : undefined 
       });
+    }
+  });
+
+  apiRouter.post("/generate", async (req, res) => {
+    const { title, description } = req.body;
+    
+    if (!title) return res.status(400).json({ error: "Title is required" });
+
+    try {
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: [{
+          role: "user",
+          parts: [{
+            text: `Create short, punchy social media post ideas based on this content:
+        Title: ${title}
+        Description: ${description}
+        
+        I need 3 things:
+        1. A "headline" for the first image (max 10 words).
+        2. A "caption" for the post body/comment section.
+        3. A "description" for a SECOND slide. This should be a concise summary or a list of key points from the original content (max 50 words).
+        
+        The headline should be max 10 words.
+        The caption should be engaging and include relevant hashtags.`
+          }]
+        }],
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              headline: { type: Type.STRING },
+              caption: { type: Type.STRING },
+              description: { type: Type.STRING },
+            },
+            required: ["headline", "caption", "description"],
+          },
+        },
+      });
+
+      const result = JSON.parse(response.text || "{}");
+      return res.json(result);
+    } catch (error: any) {
+      console.error("Gemini server error:", error);
+      return res.status(500).json({ 
+        error: "Generation failed",
+        fallback: {
+          headline: title.slice(0, 50),
+          caption: `${title}\n\nRead more at the link! #socialmedia #content`,
+          description: description?.slice(0, 200) || "",
+        }
+      });
+    }
+  });
+
+  apiRouter.post("/enhance-image", async (req, res) => {
+    const { currentImageUrl, headline } = req.body;
+    if (!currentImageUrl || !headline) return res.status(400).json({ error: "Missing parameters" });
+
+    try {
+      // Analyze current image
+      let analysisPrompt = `Analyze this image and the headline "${headline}". 
+      Create a highly detailed, professional prompt for an AI image generator to REPLICATE this scene with significantly higher fidelity, clarity and professional production quality.
+      Return ONLY the prompt string, no other text.`;
+
+      const imageResponse = await axios.get(currentImageUrl, { responseType: 'arraybuffer' });
+      const base64Data = Buffer.from(imageResponse.data).toString('base64');
+
+      const analysisResult = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: [{
+          role: "user",
+          parts: [
+            {
+              inlineData: {
+                data: base64Data,
+                mimeType: "image/webp"
+              }
+            },
+            { text: analysisPrompt }
+          ]
+        }],
+      });
+
+      const enhancedPrompt = analysisResult.text?.trim() || `Ultra-high resolution professional photography of ${headline}, cinematic lighting, 8k, realistic textures, sharp focus`;
+
+      // Generate the new image
+      const generationResult = await ai.models.generateContent({
+        model: "gemini-3.1-flash-image-preview",
+        contents: [{
+          role: "user",
+          parts: [{ text: enhancedPrompt }]
+        }],
+        config: {
+          imageConfig: {
+            aspectRatio: "1:1",
+            imageSize: "2K",
+          }
+        }
+      });
+
+      let imageData = null;
+      for (const part of generationResult.candidates?.[0]?.content?.parts || []) {
+        if (part.inlineData) {
+          imageData = `data:image/png;base64,${part.inlineData.data}`;
+          break;
+        }
+      }
+
+      if (!imageData) throw new Error("No image generated");
+      return res.json({ imageUrl: imageData });
+    } catch (error: any) {
+      console.error("Enhancement server error:", error);
+      return res.status(500).json({ error: error.message });
+    }
+  });
+
+  apiRouter.post("/image-search", async (req, res) => {
+    const { title } = req.body;
+    if (!title) return res.status(400).json({ error: "Title is required" });
+
+    try {
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: `Find a high-quality, direct featured image URL for the following article title: "${title}". 
+        Return ONLY the absolute URL of a relevant image from a reliable source like Unsplash, Pexels, or a major news site. 
+        If you cannot find a specific one, provide a high-quality Unsplash source URL that represents the topic best.
+        Example: https://images.unsplash.com/photo-12345678..`,
+        config: {
+          tools: [{ googleSearch: {} }]
+        }
+      });
+
+      const text = response.text?.trim();
+      let foundUrl = null;
+      if (text && (text.startsWith('http://') || text.startsWith('https://'))) {
+        const match = text.match(/https?:\/\/[^\s]+/);
+        foundUrl = match ? match[0] : null;
+      }
+      return res.json({ imageUrl: foundUrl });
+    } catch (error: any) {
+      console.error("Image search server error:", error);
+      return res.status(500).json({ error: error.message });
     }
   });
 
